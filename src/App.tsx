@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Download, FileSpreadsheet, Globe, Settings, FileText, TriangleAlert } from 'lucide-react';
 import * as ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
+import { motion, AnimatePresence } from 'motion/react';
 
 type Lang = 'en' | 'ar';
 type Tab = 'quotation' | 'settings';
@@ -38,7 +39,7 @@ const DICT = {
     exUnitsInc: "Units Included",
     exPriceUnit: "Price per Unit",
     exPaymentSch: "Payment Schedule Breakdowns",
-    
+
     settingsUI: "Settings",
     quotationTab: "Quotation View",
     totalPctError: "Total payment percentage must equal exactly 100%. Currently:",
@@ -50,6 +51,13 @@ const DICT = {
     installment: "Installment",
     quarter: "Quarter",
     exTotalUnits: (num: number) => `Total Price (${num} Units)`,
+    paymentPlanSettings: "Payment Plan Settings",
+    freqMonthly: "Monthly",
+    freqQuarterly: "Quarterly",
+    countInstallments: "Number of Installments",
+    paymentFreqLabel: "Payment Frequency",
+    downPaymentShort: "Down Payment",
+    handoverShort: "Handover",
   },
   ar: {
     title: "عرض استثماري",
@@ -82,7 +90,7 @@ const DICT = {
     exUnitsInc: "الوحدات المشمولة",
     exPriceUnit: "سعر الوحدة",
     exPaymentSch: "تفاصيل الدفعات",
-    
+
     settingsUI: "الإعدادات",
     quotationTab: "أداة عرض السعر",
     totalPctError: "يجب أن يكون إجمالي نسبة الدفع 100% بالضبط. المجموع الحالي:",
@@ -94,6 +102,13 @@ const DICT = {
     installment: "الدفعة",
     quarter: "الربع",
     exTotalUnits: (num: number) => `السعر الإجمالي (${num} وحدات)`,
+    paymentPlanSettings: "إعدادات خطة الدفع",
+    freqMonthly: "شهري",
+    freqQuarterly: "ربع سنوي",
+    countInstallments: "عدد الأقساط",
+    paymentFreqLabel: "تكرار الدفع",
+    downPaymentShort: "المقدم",
+    handoverShort: "الاستلام",
   }
 };
 
@@ -121,8 +136,9 @@ const DEFAULT_SCENARIOS = [
   },
 ];
 
-// Fixed elements: 20% down, 5% handover. Middle 8 = 75%. (75/8 = 9.375)
-const DEFAULT_INSTALLMENTS = Array(8).fill("9.375");
+// Default: 8 total payments (1 Down, 6 Periodic, 1 Handover)
+const DEFAULT_PERIODIC_COUNT = 6;
+const DEFAULT_INSTALLMENTS = Array(DEFAULT_PERIODIC_COUNT).fill((75 / DEFAULT_PERIODIC_COUNT).toFixed(3));
 
 export default function App() {
   const [lang, setLang] = useState<Lang>('en');
@@ -133,19 +149,113 @@ export default function App() {
   const [refNumber, setRefNumber] = useState('OMN-2024-882');
   const [unitsStr, setUnitsStr] = useState('P561, P563');
   const [scenarios, setScenarios] = useState(DEFAULT_SCENARIOS);
-  
+
   const [activeScenarioIdx, setActiveScenarioIdx] = useState(2);
   const [discount, setDiscount] = useState<number | string>(0);
+  
+  // Payment Plan State
+  const [downPaymentPct, setDownPaymentPct] = useState(20);
+  const [handoverPct, setHandoverPct] = useState(5);
+  const [numInstallments, setNumInstallments] = useState(8); // Total payments
+  const [paymentFreq, setPaymentFreq] = useState<'monthly' | 'quarterly'>('quarterly');
   const [installments, setInstallments] = useState<string[]>(DEFAULT_INSTALLMENTS);
+
+  const [currency, setCurrency] = useState<'OMR' | 'USD' | 'AED'>('OMR');
+
+  const CURRENCY_RATES = {
+    OMR: 1,
+    USD: 2.597,
+    AED: 9.54,
+  };
 
   const t = DICT[lang];
   const activeScenario = scenarios[activeScenarioIdx];
   const discountVal = typeof discount === 'number' ? discount : (parseFloat(discount as string) || 0);
 
+  // Sync installments when number changes
+  useEffect(() => {
+    const periodicCount = Math.max(0, numInstallments - 2);
+    if (installments.length !== periodicCount) {
+      const remaining = 100 - downPaymentPct - handoverPct;
+      const each = periodicCount > 0 ? (remaining / periodicCount).toFixed(3) : "0";
+      setInstallments(Array(periodicCount).fill(each));
+    }
+  }, [numInstallments, downPaymentPct, handoverPct]);
+
+  const formatPrice = (val: number) => {
+    const converted = val * CURRENCY_RATES[currency];
+    return new Intl.NumberFormat('en-US', {
+      minimumFractionDigits: currency === 'OMR' ? 3 : 2,
+      maximumFractionDigits: currency === 'OMR' ? 3 : 2,
+    }).format(converted);
+  };
+
   const formatOMR = (val: number) =>
     new Intl.NumberFormat('en-OM', {
       minimumFractionDigits: 3, maximumFractionDigits: 3,
     }).format(val);
+
+  // Animated Number Helper
+  const AnimatedNumber = ({ value }: { value: number }) => {
+    return <span>{formatPrice(value)}</span>;
+  };
+
+  // Simple SVG Pie Chart Component
+  const PaymentChart = ({ data }: { data: { label: string, value: number, color: string }[] }) => {
+    let cumulativePercent = 0;
+    
+    function getCoordinatesForPercent(percent: number) {
+      const x = Math.cos(2 * Math.PI * percent);
+      const y = Math.sin(2 * Math.PI * percent);
+      return [x, y];
+    }
+
+    return (
+      <div className="flex flex-col items-center">
+        <div className="relative w-48 h-48 mx-auto mb-4">
+          <svg viewBox="-1 -1 2 2" className="transform -rotate-90 w-full h-full">
+            {data.map((slice, i) => {
+              const [startX, startY] = getCoordinatesForPercent(cumulativePercent);
+              cumulativePercent += slice.value / 100;
+              const [endX, endY] = getCoordinatesForPercent(cumulativePercent);
+              const largeArcFlag = slice.value / 100 > 0.5 ? 1 : 0;
+              const pathData = [
+                `M ${startX} ${startY}`,
+                `A 1 1 0 ${largeArcFlag} 1 ${endX} ${endY}`,
+                `L 0 0`,
+              ].join(' ');
+              return (
+                <path 
+                  key={i} 
+                  d={pathData} 
+                  fill={slice.color} 
+                  className="transition-all duration-300 hover:opacity-80 cursor-pointer" 
+                />
+              );
+            })}
+          </svg>
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="bg-white/90 backdrop-blur-sm w-24 h-24 rounded-full flex flex-col items-center justify-center shadow-lg border border-white/50">
+              <span className="text-[10px] text-slate-500 font-bold uppercase text-center leading-tight px-2">{t.projectedNet}</span>
+            </div>
+          </div>
+        </div>
+        
+        {/* Legend */}
+        <div className="w-full space-y-2 mt-2">
+          {data.map((item, i) => (
+            <div key={i} className="flex items-center justify-between text-[11px] font-bold">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }}></div>
+                <span className="text-slate-600">{item.label}</span>
+              </div>
+              <span className="text-slate-900">{item.value.toFixed(1)}%</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   const toggleLang = () => setLang(l => l === 'en' ? 'ar' : 'en');
 
@@ -157,8 +267,6 @@ export default function App() {
   const netPrice = totalPrice - amountSaved;
 
   // Percentage Calculations
-  const downPaymentPct = 20;
-  const handoverPct = 5;
   const installmentsSum = installments.reduce((acc, val) => acc + (parseFloat(val) || 0), 0);
   const totalPctSum = downPaymentPct + installmentsSum + handoverPct;
   const isValidPct = Math.abs(totalPctSum - 100) < 0.001;
@@ -269,58 +377,60 @@ export default function App() {
 
       // --- QUOTATION DETAILS ---
       addSectionHeader(`${t.exQuotation} ${sName}`, r++);
-      
+
       addDataRow(r++, t.exUnitsInc, unitList.join(' & '), false, true);
       addDataRow(r++, scenario.title[lang], scenario.desc[lang], false);
-      
+
       const priceUnitCell = addDataRow(r++, t.exPriceUnit, scenario.price, true);
       r++; // gap
 
       // --- FINANCIAL BREAKDOWN ---
       addSectionHeader(t.finAdj, r++);
-      
+
       const totalCell = addDataRow(r++, t.exTotalUnits(numUnits), { formula: `=${priceUnitCell}*${numUnits}`, result: scenario.price * numUnits }, true);
-      
+
       const discountCell = addDataRow(r++, t.discountPct, discountVal / 100, false, false, theme.goldBg, theme.gold);
-      
+
       const savedCell = addDataRow(r++, t.amountSaved, { formula: `=${totalCell}*${discountCell}`, result: scenario.price * numUnits * (discountVal / 100) }, true);
 
       // Hero row for Net Proposal Price
       const netRowObj = worksheet.getRow(r);
       netRowObj.height = 36;
-      
+
       const netLabel = worksheet.getCell(`B${r}`);
       netLabel.value = t.netPrice.toUpperCase();
       netLabel.font = { name: 'Segoe UI', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
       netLabel.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: theme.primary } };
       netLabel.alignment = { vertical: 'middle', indent: 1 };
-      
+
       const netValue = worksheet.getCell(`C${r}`);
       netValue.value = { formula: `=${totalCell}-${savedCell}`, result: scenario.price * numUnits - (scenario.price * numUnits * (discountVal / 100)) };
       netValue.font = { name: 'Segoe UI', size: 16, bold: true, color: { argb: theme.gold } };
       netValue.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: theme.primary } };
       netValue.alignment = { vertical: 'middle', horizontal: lang === 'ar' ? 'left' : 'right' };
       netValue.numFmt = `#,##0.000 "${t.currency}"`;
-      
+
       const netPriceCell = `C${r}`;
       r += 2; // gap
 
       // --- PAYMENT SCHEDULE ---
       addSectionHeader(t.exPaymentSch, r++);
-      
-      addDataRow(r++, `${t.downPayment} (${downPaymentPct}%)`, { formula: `=${netPriceCell}*${downPaymentPct/100}` }, true, false, theme.lightGray);
-      
+
+      addDataRow(r++, `${t.downPayment} (${downPaymentPct}%)`, { formula: `=${netPriceCell}*${downPaymentPct / 100}` }, true, false, theme.lightGray);
+
       installments.forEach((strVal, i) => {
         const pct = parseFloat(strVal) || 0;
-        addDataRow(r++, `${t.installment} ${i+1} - ${t.quarter} ${i+1} (${pct}%)`, { formula: `=${netPriceCell}*${pct/100}` }, true);
+        const freqLabel = paymentFreq === 'monthly' ? t.freqMonthly : t.freqQuarterly;
+        // Periodic installments start from Payment 2
+        addDataRow(r++, `${t.installment} ${i + 1} (${pct}%)`, { formula: `=${netPriceCell}*${pct / 100}` }, true);
       });
 
-      addDataRow(r++, `${t.handover} (${handoverPct}%)`, { formula: `=${netPriceCell}*${handoverPct/100}` }, true, false, theme.lightGray);
+      addDataRow(r++, `${t.handover} (${handoverPct}%)`, { formula: `=${netPriceCell}*${handoverPct / 100}` }, true, false, theme.lightGray);
 
       r += 2;
 
       // --- FOOTER TERMS ---
-      worksheet.mergeCells(`B${r}:C${r+2}`);
+      worksheet.mergeCells(`B${r}:C${r + 2}`);
       const footerCell = worksheet.getCell(`B${r}`);
       footerCell.value = `${t.termsTitle}\n${t.terms1} ${discountVal}${t.terms2} ${sName}. ${t.validText}`;
       footerCell.font = { name: 'Segoe UI', size: 9, italic: true, color: { argb: theme.textMuted } };
@@ -343,7 +453,20 @@ export default function App() {
             <p className="mt-1 opacity-60 text-xs">{t.subtitlePrep} {clientName} | {t.ref} {refNumber}</p>
           </div>
           <div className="text-start sm:text-end flex sm:flex-col items-center sm:items-end gap-3 sm:gap-0">
-            <div className="flex items-center gap-4 mb-2">
+            <div className="flex items-center gap-2 mb-2">
+              {/* Currency Selector */}
+              <div className="flex bg-slate-800 p-1 rounded-lg mr-2">
+                {(['OMR', 'USD', 'AED'] as const).map((curr) => (
+                  <button
+                    key={curr}
+                    onClick={() => setCurrency(curr)}
+                    className={`px-2 py-1 text-[10px] font-bold rounded transition-all ${currency === curr ? 'bg-amber-700 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    {curr}
+                  </button>
+                ))}
+              </div>
+
               <button onClick={toggleLang} className="flex items-center gap-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-full transition-colors focus:ring-2 focus:ring-amber-500">
                 <Globe size={14} />
                 {lang === 'ar' ? 'English' : 'عربي'}
@@ -351,8 +474,9 @@ export default function App() {
             </div>
             {activeTab === 'quotation' && (
               <>
-                <div className="text-2xl font-bold text-slate-50">
-                  <span className="text-amber-700">{t.currency}</span> {formatOMR(netPrice)}
+                <div className="text-2xl font-bold text-slate-50 flex items-baseline gap-2">
+                  <span className="text-amber-700 text-sm uppercase">{currency}</span> 
+                  <AnimatedNumber value={netPrice * CURRENCY_RATES[currency]} />
                 </div>
                 <div className="text-[11px] uppercase tracking-widest opacity-80">{t.projectedNet}</div>
               </>
@@ -360,20 +484,31 @@ export default function App() {
           </div>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="px-8 flex gap-6 mt-2 relative top-[4px]">
-          <button 
-            onClick={() => setActiveTab('quotation')}
-            className={`flex items-center gap-2 pb-3 px-1 text-sm font-bold border-b-4 transition-colors ${activeTab === 'quotation' ? 'border-amber-700 text-amber-500' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
-          >
-            <FileText size={16}/> {t.quotationTab}
-          </button>
-          <button 
-            onClick={() => setActiveTab('settings')}
-            className={`flex items-center gap-2 pb-3 px-1 text-sm font-bold border-b-4 transition-colors ${activeTab === 'settings' ? 'border-amber-700 text-amber-500' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
-          >
-            <Settings size={16}/> {t.settingsUI}
-          </button>
+        {/* Tab Navigation + PDF Button */}
+        <div className="px-8 flex justify-between items-center mt-2 relative top-[4px]">
+          <div className="flex gap-6">
+            <button
+              onClick={() => setActiveTab('quotation')}
+              className={`flex items-center gap-2 pb-3 px-1 text-sm font-bold border-b-4 transition-colors ${activeTab === 'quotation' ? 'border-amber-700 text-amber-500' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+            >
+              <FileText size={16} /> {t.quotationTab}
+            </button>
+            <button
+              onClick={() => setActiveTab('settings')}
+              className={`flex items-center gap-2 pb-3 px-1 text-sm font-bold border-b-4 transition-colors ${activeTab === 'settings' ? 'border-amber-700 text-amber-500' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+            >
+              <Settings size={16} /> {t.settingsUI}
+            </button>
+          </div>
+
+          {activeTab === 'quotation' && (
+            <button 
+              onClick={() => window.print()}
+              className="flex items-center gap-2 pb-3 px-3 text-sm font-bold text-emerald-400 hover:text-emerald-300 transition-colors"
+            >
+              <Download size={16}/> {lang === 'ar' ? 'طباعة / PDF' : 'Print / PDF'}
+            </button>
+          )}
         </div>
       </header>
 
@@ -382,7 +517,7 @@ export default function App() {
         <main className="flex-1 w-full max-w-4xl mx-auto px-8 py-8 animate-in fade-in duration-300">
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-6">
             <h2 className="text-xl font-bold text-slate-800 border-b pb-2">{t.settingsUI}</h2>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">{t.clientName}</label>
@@ -405,19 +540,48 @@ export default function App() {
                   <div key={scen.id} className="bg-slate-50 p-4 border border-slate-200 rounded-lg">
                     <label className="block text-xs font-bold text-slate-700 mb-2">{scen.title[lang]}</label>
                     <div className="flex items-center gap-2">
-                      <input 
-                        type="number" value={scen.price} 
+                      <input
+                        type="number" value={scen.price}
                         onChange={(e) => {
                           const newS = [...scenarios];
                           newS[idx].price = Number(e.target.value) || 0;
                           setScenarios(newS);
-                        }} 
-                        className="w-full bg-white border border-slate-300 p-2 rounded focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono" 
+                        }}
+                        className="w-full bg-white border border-slate-300 p-2 rounded focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
                       />
                       <span className="text-xs text-slate-500 font-bold">{t.currency}</span>
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+
+            <div className="pt-6 border-t border-slate-100">
+              <h3 className="text-sm font-bold text-slate-600 mb-4 uppercase tracking-wider">{t.paymentPlanSettings}</h3>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">{t.downPaymentShort} (%)</label>
+                  <input type="number" value={downPaymentPct} onChange={(e) => setDownPaymentPct(Number(e.target.value))} className="w-full bg-slate-50 border border-slate-200 p-2 rounded focus:ring-2 focus:ring-amber-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">{t.handoverShort} (%)</label>
+                  <input type="number" value={handoverPct} onChange={(e) => setHandoverPct(Number(e.target.value))} className="w-full bg-slate-50 border border-slate-200 p-2 rounded focus:ring-2 focus:ring-amber-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">{lang === 'ar' ? 'إجمالي عدد الدفعات (بما في ذلك المقدم والاستلام)' : 'Total Number of Payments (Inc. Down & Handover)'}</label>
+                  <input type="number" min="2" value={numInstallments} onChange={(e) => setNumInstallments(Number(e.target.value))} className="w-full bg-slate-50 border border-slate-200 p-2 rounded focus:ring-2 focus:ring-amber-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">{t.paymentFreqLabel}</label>
+                  <select 
+                    value={paymentFreq} 
+                    onChange={(e) => setPaymentFreq(e.target.value as any)}
+                    className="w-full bg-slate-50 border border-slate-200 p-2 rounded focus:ring-2 focus:ring-amber-500 outline-none"
+                  >
+                    <option value="monthly">{t.freqMonthly}</option>
+                    <option value="quarterly">{t.freqQuarterly}</option>
+                  </select>
+                </div>
               </div>
             </div>
 
@@ -432,124 +596,158 @@ export default function App() {
 
       {/* Quotation View */}
       {activeTab === 'quotation' && (
-      <>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 px-8 py-6 shrink-0 animate-in fade-in duration-300">
-          {scenarios.map((scenario, idx) => (
-            <div key={scenario.id} onClick={() => setActiveScenarioIdx(idx)} className={`cursor-pointer transition-all bg-white border rounded-lg p-4 shadow-sm relative ${activeScenarioIdx === idx ? 'border-2 border-amber-700 bg-amber-50/30' : 'border-slate-200 hover:border-slate-300'}`}>
-              <span className={`absolute top-3 end-3 text-[10px] uppercase px-2 py-0.5 rounded font-bold ${activeScenarioIdx === idx ? 'bg-amber-700 text-white' : 'bg-slate-200 text-slate-600'}`}>
-                {t.scenarioLabel} {idx + 1}
-              </span>
-              <h3 className="m-0 mb-2 text-sm text-slate-500 font-semibold">{scenario.title[lang]}</h3>
-              <div className={`text-lg font-bold ${activeScenarioIdx === idx ? 'text-amber-700' : 'text-slate-800'}`}>
-                {formatOMR(scenario.price)} {t.currency}
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 px-8 py-6 shrink-0 animate-in fade-in duration-300">
+            {scenarios.map((scenario, idx) => (
+              <div key={scenario.id} onClick={() => setActiveScenarioIdx(idx)} className={`cursor-pointer transition-all bg-white border rounded-lg p-4 shadow-sm relative ${activeScenarioIdx === idx ? 'border-2 border-amber-700 bg-amber-50/30' : 'border-slate-200 hover:border-slate-300'}`}>
+                <span className={`absolute top-3 end-3 text-[10px] uppercase px-2 py-0.5 rounded font-bold ${activeScenarioIdx === idx ? 'bg-amber-700 text-white' : 'bg-slate-200 text-slate-600'}`}>
+                  {t.scenarioLabel} {idx + 1}
+                </span>
+                <h3 className="m-0 mb-2 text-sm text-slate-500 font-semibold">{scenario.title[lang]}</h3>
+                <div className={`text-lg font-bold ${activeScenarioIdx === idx ? 'text-amber-700' : 'text-slate-800'}`}>
+                  {formatPrice(scenario.price)} {currency}
+                </div>
+                <div className="text-xs mt-1 text-slate-400">{scenario.desc[lang]}</div>
+                <div className={`mt-3 pt-3 border-t border-dashed border-slate-200 font-semibold ${activeScenarioIdx === idx ? 'text-amber-700' : 'text-slate-800'}`}>
+                  {formatPrice(scenario.price * numUnits)} {currency} <span className="text-[10px] font-normal text-slate-600">{t.totalLabel}</span>
+                </div>
               </div>
-              <div className="text-xs mt-1 text-slate-400">{scenario.desc[lang]}</div>
-              <div className={`mt-3 pt-3 border-t border-dashed border-slate-200 font-semibold ${activeScenarioIdx === idx ? 'text-amber-700' : 'text-slate-800'}`}>
-                {formatOMR(scenario.price * numUnits)} {t.currency} <span className="text-[10px] font-normal text-slate-600">{t.totalLabel}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <main className="flex-1 grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6 px-8 pb-6 w-full max-w-7xl mx-auto items-start animate-in fade-in duration-300">
-          <div className="bg-slate-100 border border-slate-300 rounded-lg p-5">
-            <h4 className="m-0 mb-4 uppercase text-[11px] tracking-[0.05em] text-slate-500 font-bold">{t.finAdj}</h4>
-            <div className="mb-5">
-              <label className="block text-xs mb-2 font-semibold text-slate-700">{t.discountPct}</label>
-              <div className="flex items-center gap-2">
-                <input type="number" min="0" max="100" value={discount} onChange={(e) => setDiscount(e.target.value)} className="bg-white border focus:outline-none focus:ring-2 ring-amber-700/20 border-amber-700 text-amber-700 p-2 rounded w-[80px] font-bold text-center" />
-                <span className="font-bold text-slate-700">%</span>
-              </div>
-            </div>
-            <div className="bg-white p-3 rounded-md mb-3 shadow-sm border border-slate-200/60">
-              <div className="text-[11px] text-slate-500 font-semibold mb-0.5">{t.amountSaved}</div>
-              <div className="text-base font-bold text-emerald-600">- {formatOMR(amountSaved)} {t.currency}</div>
-            </div>
-            <div className="bg-white p-3 rounded-md shadow-sm border border-slate-200/60 mb-5 relative overflow-hidden">
-              <div className="absolute start-0 top-0 bottom-0 w-1 bg-slate-800"></div>
-              <div className="text-[11px] text-slate-500 font-semibold mb-0.5 ms-2">{t.netPrice}</div>
-              <div className="text-base font-bold text-slate-900 ms-2">{formatOMR(netPrice)} {t.currency}</div>
-            </div>
-            <button
-              onClick={exportToExcel}
-              disabled={!isValidPct}
-              className={`hidden sm:flex transition-colors text-white px-4 py-2.5 rounded font-semibold text-xs items-center gap-2 w-full justify-center mt-2 shadow-sm ${isValidPct ? 'bg-slate-900 hover:bg-slate-800' : 'bg-slate-400 cursor-not-allowed'}`}
-            >
-              <FileSpreadsheet size={16} className={isValidPct ? 'text-emerald-400' : 'text-slate-300'} /> {t.exportBtn}
-            </button>
+            ))}
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-lg overflow-hidden flex flex-col shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm text-start">
-                <thead>
-                  <tr>
-                    <th className="bg-slate-50 text-slate-500 px-4 py-3 border-b-2 border-slate-200 uppercase text-[11px] tracking-wider font-bold text-start">{t.paymentPhase}</th>
-                    <th className="bg-slate-50 text-slate-500 px-4 py-3 border-b-2 border-slate-200 uppercase text-[11px] tracking-wider font-bold text-start">{t.milestone}</th>
-                    <th className="bg-slate-50 text-slate-500 px-4 py-3 border-b-2 border-slate-200 uppercase text-[11px] tracking-wider font-bold text-start">{t.percentage}</th>
-                    <th className="bg-slate-50 text-slate-500 px-4 py-3 border-b-2 border-slate-200 uppercase text-[11px] tracking-wider font-bold text-start">{t.amountCol} ({t.currency})</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  <tr>
-                    <td className="px-4 py-3 text-slate-700 text-start">{t.downPayment}</td>
-                    <td className="px-4 py-3 text-slate-500 text-start">{t.uponBooking}</td>
-                    <td className="px-4 py-3 font-semibold text-slate-700 text-start">{downPaymentPct}%</td>
-                    <td className="px-4 py-3 font-mono font-semibold text-slate-800 text-start">{formatOMR(netPrice * (downPaymentPct/100))}</td>
-                  </tr>
-                  
-                  {installments.map((valStr, i) => {
-                    const parsed = parseFloat(valStr) || 0;
-                    return (
-                      <tr key={i} className="bg-slate-50/50 hover:bg-slate-50 transition-colors">
-                        <td className="px-4 py-2.5 text-slate-700 text-start">{t.installment} {i+1}</td>
-                        <td className="px-4 py-2.5 text-slate-500 text-start">{t.quarter} {i+1}</td>
-                        <td className="px-4 py-2.5 text-slate-600 text-start">
-                          <div className="flex items-center gap-1">
-                            <input 
-                              type="number" step="0.1" value={installments[i]}
-                              onChange={(e) => handleInstallmentChange(i, e.target.value)}
-                              className={`w-20 px-2 py-1 border rounded font-mono text-sm focus:outline-none focus:ring-2 ${!isValidPct ? 'border-red-300 focus:ring-red-500' : 'border-slate-300 focus:ring-amber-500 bg-white'}`}
-                            />
-                            <span className="text-slate-500">%</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-2.5 font-mono text-slate-600 text-start">{formatOMR(netPrice * (parsed/100))}</td>
-                      </tr>
-                    );
-                  })}
+          <main className="flex-1 grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6 px-8 pb-6 w-full max-w-7xl mx-auto items-start animate-in fade-in duration-300">
+            <div className="bg-slate-100 border border-slate-300 rounded-lg p-5">
+              <h4 className="m-0 mb-4 uppercase text-[11px] tracking-[0.05em] text-slate-500 font-bold">{t.finAdj}</h4>
+              
+              {/* Payment Chart */}
+              <PaymentChart 
+                data={[
+                  { label: t.downPayment, value: downPaymentPct, color: '#0f172a' },
+                  { label: t.installment, value: installmentsSum, color: '#b45309' },
+                  { label: t.handover, value: handoverPct, color: '#ec4899' },
+                ]}
+              />
 
-                  <tr>
-                    <td className="px-4 py-3 text-slate-700 text-start">{t.handover}</td>
-                    <td className="px-4 py-3 text-slate-500 text-start">{t.keyHandover}</td>
-                    <td className="px-4 py-3 font-semibold text-slate-700 text-start">{handoverPct}%</td>
-                    <td className="px-4 py-3 font-mono font-semibold text-slate-800 text-start">{formatOMR(netPrice * (handoverPct/100))}</td>
-                  </tr>
-                  <tr className="bg-slate-50 font-bold border-t-2 border-slate-200">
-                    <td colSpan={2} className="px-4 py-3 text-slate-800 text-start">{t.grandTotal}</td>
-                    <td className={`px-4 py-3 text-start ${isValidPct ? 'text-emerald-600' : 'text-red-600'}`}>{totalPctSum}%</td>
-                    <td className="px-4 py-3 font-mono text-amber-700 text-start">{formatOMR(netPrice)}</td>
-                  </tr>
-                </tbody>
-              </table>
+              <div className="mb-5 px-1">
+                <div className="flex justify-between items-center mb-2">
+                  <label className="block text-xs font-semibold text-slate-700">{t.discountPct}</label>
+                  <span className="text-sm font-bold text-amber-700">{discount}%</span>
+                </div>
+                <input 
+                  type="range" min="0" max="15" step="0.5" 
+                  value={discount} 
+                  onChange={(e) => setDiscount(e.target.value)} 
+                  className="w-full h-1.5 bg-slate-300 rounded-lg appearance-none cursor-pointer accent-amber-700" 
+                />
+                <div className="flex justify-between text-[10px] text-slate-400 mt-1 font-bold">
+                  <span>0%</span>
+                  <span>15% Max</span>
+                </div>
+              </div>
 
-              {!isValidPct && (
-                <div className="p-3 m-4 mb-0 bg-red-50 border border-red-200 rounded text-red-600 text-xs font-bold flex flex-wrap items-center gap-2">
-                  <TriangleAlert size={14} /> {t.totalPctError} {totalPctSum.toFixed(3)}%
+              <div className="bg-white p-3 rounded-md mb-3 shadow-sm border border-slate-200/60">
+                <div className="text-[11px] text-slate-500 font-semibold mb-0.5">{t.amountSaved}</div>
+                <div className="text-base font-bold text-emerald-600">
+                  - <AnimatedNumber value={amountSaved} /> {currency}
                 </div>
-              )}
-            </div>
-            <div className="p-4 bg-white text-xs text-slate-500 flex flex-wrap gap-6 border-t border-slate-100 mt-auto">
-              {unitList.map(unit => (
-                <div key={unit} className="flex gap-1.5 items-center">
-                  <strong className="text-slate-700">{unit}:</strong> 
-                  <span className="font-mono">{formatOMR(netPrice / numUnits)}</span> {t.currency}
+              </div>
+              
+              <div className="bg-white p-3 rounded-md shadow-sm border border-slate-200/60 mb-5 relative overflow-hidden">
+                <div className="absolute start-0 top-0 bottom-0 w-1 bg-slate-800"></div>
+                <div className="text-[11px] text-slate-500 font-semibold mb-0.5 ms-2">{t.netPrice}</div>
+                <div className="text-base font-bold text-slate-900 ms-2">
+                  <AnimatedNumber value={netPrice} /> {currency}
                 </div>
-              ))}
+              </div>
+
+              <button
+                onClick={exportToExcel}
+                disabled={!isValidPct}
+                className={`hidden sm:flex transition-colors text-white px-4 py-2.5 rounded font-semibold text-xs items-center gap-2 w-full justify-center mt-2 shadow-sm ${isValidPct ? 'bg-slate-900 hover:bg-slate-800' : 'bg-slate-400 cursor-not-allowed'}`}
+              >
+                <FileSpreadsheet size={16} className={isValidPct ? 'text-emerald-400' : 'text-slate-300'} /> {t.exportBtn}
+              </button>
             </div>
-          </div>
-        </main>
-      </>
+
+            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden flex flex-col shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm text-start">
+                  <thead>
+                    <tr>
+                      <th className="bg-slate-50 text-slate-500 px-4 py-3 border-b-2 border-slate-200 uppercase text-[11px] tracking-wider font-bold text-start">{t.paymentPhase}</th>
+                      <th className="bg-slate-50 text-slate-500 px-4 py-3 border-b-2 border-slate-200 uppercase text-[11px] tracking-wider font-bold text-start">{t.milestone}</th>
+                      <th className="bg-slate-50 text-slate-500 px-4 py-3 border-b-2 border-slate-200 uppercase text-[11px] tracking-wider font-bold text-start">{t.percentage}</th>
+                      <th className="bg-slate-50 text-slate-500 px-4 py-3 border-b-2 border-slate-200 uppercase text-[11px] tracking-wider font-bold text-start">{t.amountCol} ({currency})</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    <tr>
+                      <td className="px-4 py-3 text-slate-700 text-start">{t.downPayment}</td>
+                      <td className="px-4 py-3 text-slate-500 text-start">{t.uponBooking}</td>
+                      <td className="px-4 py-3 font-semibold text-slate-700 text-start">{downPaymentPct}%</td>
+                      <td className="px-4 py-3 font-mono font-semibold text-slate-800 text-start">
+                        <AnimatedNumber value={netPrice * (downPaymentPct / 100)} />
+                      </td>
+                    </tr>
+
+                    {installments.map((valStr, i) => {
+                      const parsed = parseFloat(valStr) || 0;
+                      return (
+                        <tr key={i} className="bg-slate-50/50 hover:bg-slate-50 transition-colors">
+                          <td className="px-4 py-2.5 text-slate-700 text-start">{t.installment} {i + 1}</td>
+                          <td className="px-4 py-2.5 text-slate-500 text-start">{paymentFreq === 'monthly' ? t.freqMonthly : t.freqQuarterly} {i + 1}</td>
+                          <td className="px-4 py-2.5 text-slate-600 text-start">
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number" step="0.1" value={installments[i]}
+                                onChange={(e) => handleInstallmentChange(i, e.target.value)}
+                                className={`w-20 px-2 py-1 border rounded font-mono text-sm focus:outline-none focus:ring-2 ${!isValidPct ? 'border-red-300 focus:ring-red-500' : 'border-slate-300 focus:ring-amber-500 bg-white'}`}
+                              />
+                              <span className="text-slate-500">%</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-2.5 font-mono text-slate-600 text-start">
+                            <AnimatedNumber value={netPrice * (parsed / 100)} />
+                          </td>
+                        </tr>
+                      );
+                    })}
+
+                    <tr>
+                      <td className="px-4 py-3 text-slate-700 text-start">{t.handover}</td>
+                      <td className="px-4 py-3 text-slate-500 text-start">{t.keyHandover}</td>
+                      <td className="px-4 py-3 font-semibold text-slate-700 text-start">{handoverPct}%</td>
+                      <td className="px-4 py-3 font-mono font-semibold text-slate-800 text-start">
+                        <AnimatedNumber value={netPrice * (handoverPct / 100)} />
+                      </td>
+                    </tr>
+                    <tr className="bg-slate-50 font-bold border-t-2 border-slate-200">
+                      <td colSpan={2} className="px-4 py-3 text-slate-800 text-start">{t.grandTotal}</td>
+                      <td className={`px-4 py-3 text-start ${isValidPct ? 'text-emerald-600' : 'text-red-600'}`}>{totalPctSum}%</td>
+                      <td className="px-4 py-3 font-mono text-amber-700 text-start">
+                        <AnimatedNumber value={netPrice} />
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+
+                {!isValidPct && (
+                  <div className="p-3 m-4 mb-0 bg-red-50 border border-red-200 rounded text-red-600 text-xs font-bold flex flex-wrap items-center gap-2">
+                    <TriangleAlert size={14} /> {t.totalPctError} {totalPctSum.toFixed(3)}%
+                  </div>
+                )}
+              </div>
+              <div className="p-4 bg-white text-xs text-slate-500 flex flex-wrap gap-6 border-t border-slate-100 mt-auto">
+                {unitList.map(unit => (
+                  <div key={unit} className="flex gap-1.5 items-center">
+                    <strong className="text-slate-700">{unit}:</strong>
+                    <span className="font-mono"><AnimatedNumber value={netPrice / numUnits} /></span> {currency}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </main>
+        </>
       )}
 
       <footer className="text-[11px] text-slate-500 py-4 px-8 bg-white border-t border-slate-200 shrink-0 mt-auto">
