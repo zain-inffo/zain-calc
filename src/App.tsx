@@ -122,56 +122,76 @@ const DICT = {
   }
 };
 
-const DEFAULT_SCENARIOS = [
-  {
-    id: 1,
-    name: { en: 'Scenario 1 (Base)', ar: 'السيناريو 1 (الأساسي)' },
-    title: { en: 'Base Scenario', ar: 'السيناريو الأساسي' },
-    desc: { en: 'Price Per Unit', ar: 'السعر للوحدة الأساسية' },
-    price: 70422.0,
-  },
-  {
-    id: 2,
-    name: { en: 'Scenario 2 (Standard)', ar: 'السيناريو 2 (القياسي)' },
-    title: { en: 'Standard Add-ons', ar: 'إضافات قياسية' },
-    desc: { en: 'Includes Kitchen & Split AC', ar: 'يشمل مطبخ وتكييف منفصل' },
-    price: 75882.0,
-  },
-  {
-    id: 3,
-    name: { en: 'Scenario 3 (Premium)', ar: 'السيناريو 3 (المميز)' },
-    title: { en: 'Premium Add-ons', ar: 'إضافات مميزة' },
-    desc: { en: 'Includes Ducted AC & Master BR', ar: 'يشمل تكييف مركزي وغرفة نوم رئيسية' },
-    price: 76535.975,
-  },
-];
+const VILLA_DATA = {
+  Q: { name: 'Villa Type Q', basePriceOmani: 70422.0, basePriceForeigner: 75000.0, cabinetSize: '3600x3900 mm', cabinetPrice: 1885.0 },
+  P: { name: 'Villa Type P', basePriceOmani: 70422.0, basePriceForeigner: 75000.0, cabinetSize: '3600x3900 mm', cabinetPrice: 1885.0 },
+  O: { name: 'Villa Type O', basePriceOmani: 70422.0, basePriceForeigner: 75000.0, cabinetSize: '3800x3800 mm', cabinetPrice: 1937.0 },
+};
+
+const ADDON_PRICES = {
+  appliances: 1606.800,
+  ac: {
+    Q: { split: 2697.500, advanced: 4179.500 },
+    P: { split: 1709.500, advanced: 2489.500 },
+    O: { split: 1443.000, advanced: 2196.500 },
+  }
+};
 
 // Default: 8 total payments (1 Down, 6 Periodic, 1 Handover)
 const DEFAULT_PERIODIC_COUNT = 6;
 const DEFAULT_INSTALLMENTS = Array(DEFAULT_PERIODIC_COUNT).fill((75 / DEFAULT_PERIODIC_COUNT).toFixed(3));
 
 export default function App() {
-  const [lang, setLang] = useState<Lang>('en');
+  // Persistence Helper
+  const getSaved = (key: string, def: any) => {
+    const saved = localStorage.getItem(`realestate_${key}`);
+    if (saved === null) return def;
+    try { return JSON.parse(saved); } catch { return saved; }
+  };
+
+  const [lang, setLang] = useState<Lang>(() => getSaved('lang', 'ar'));
   const [activeTab, setActiveTab] = useState<Tab>('quotation');
 
   // Business State
-  const [clientName, setClientName] = useState('Mr. Rashid');
-  const [refNumber, setRefNumber] = useState('OMN-2024-882');
-  const [unitsStr, setUnitsStr] = useState('P561, P563');
-  const [scenarios, setScenarios] = useState(DEFAULT_SCENARIOS);
-
-  const [activeScenarioIdx, setActiveScenarioIdx] = useState(2);
-  const [discount, setDiscount] = useState<number | string>(0);
+  const [clientName, setClientName] = useState(() => getSaved('clientName', 'Mr. Rashid'));
+  const [refNumber, setRefNumber] = useState(() => getSaved('refNumber', 'OMN-2024-882'));
+  const [unitsStr, setUnitsStr] = useState(() => getSaved('unitsStr', 'P561, P563'));
+  const [villaConfigs, setVillaConfigs] = useState(() => getSaved('villaConfigs', VILLA_DATA));
+  const [discount, setDiscount] = useState<number | string>(() => getSaved('discount', 0));
   
   // Payment Plan State
-  const [downPaymentPct, setDownPaymentPct] = useState(20);
-  const [handoverPct, setHandoverPct] = useState(5);
-  const [numInstallments, setNumInstallments] = useState(8); // Total payments
-  const [paymentFreq, setPaymentFreq] = useState<'monthly' | 'quarterly'>('quarterly');
-  const [installments, setInstallments] = useState<string[]>(DEFAULT_INSTALLMENTS);
-  const [isBeneficiary, setIsBeneficiary] = useState(false);
+  const [downPaymentPct, setDownPaymentPct] = useState(() => getSaved('downPaymentPct', 20));
+  const [handoverPct, setHandoverPct] = useState(() => getSaved('handoverPct', 5));
+  const [numInstallments, setNumInstallments] = useState(() => getSaved('numInstallments', 8));
+  const [paymentFreq, setPaymentFreq] = useState<'monthly' | 'quarterly'>(() => getSaved('paymentFreq', 'quarterly'));
+  const [installments, setInstallments] = useState<string[]>(() => getSaved('installments', DEFAULT_INSTALLMENTS));
 
-  const [currency, setCurrency] = useState<'OMR' | 'USD' | 'AED'>('OMR');
+  // Dynamic Configurator State
+  const [villaType, setVillaType] = useState<keyof typeof VILLA_DATA>(() => getSaved('villaType', 'Q'));
+  const [hasCabinets, setHasCabinets] = useState(() => getSaved('hasCabinets', false));
+  const [hasAppliances, setHasAppliances] = useState(() => getSaved('hasAppliances', false));
+  const [acType, setAcType] = useState<'none' | 'split' | 'advanced'>(() => getSaved('acType', 'none'));
+  const [clientCategory, setClientCategory] = useState<'omani_beneficiary' | 'omani_non_beneficiary' | 'foreigner'>(() => getSaved('clientCategory', 'omani_non_beneficiary'));
+
+  const [currency, setCurrency] = useState<'OMR' | 'USD' | 'AED'>(() => getSaved('currency', 'OMR'));
+
+  // Persistence Effect
+  useEffect(() => {
+    const state = {
+      lang, clientName, refNumber, unitsStr, villaConfigs, discount,
+      downPaymentPct, handoverPct, numInstallments, paymentFreq,
+      installments, villaType, hasCabinets, hasAppliances, acType,
+      clientCategory, currency
+    };
+    Object.entries(state).forEach(([key, val]) => {
+      localStorage.setItem(`realestate_${key}`, JSON.stringify(val));
+    });
+  }, [
+    lang, clientName, refNumber, unitsStr, villaConfigs, discount,
+    downPaymentPct, handoverPct, numInstallments, paymentFreq,
+    installments, villaType, hasCabinets, hasAppliances, acType,
+    clientCategory, currency
+  ]);
 
   const CURRENCY_RATES = {
     OMR: 1,
@@ -180,8 +200,20 @@ export default function App() {
   };
 
   const t = DICT[lang];
-  const activeScenario = scenarios[activeScenarioIdx];
+  
+  // Calculate dynamic base price
+  const activeVilla = villaConfigs[villaType];
+  const isForeigner = clientCategory === 'foreigner';
+  const basePricePerUnit = isForeigner ? activeVilla.basePriceForeigner : activeVilla.basePriceOmani;
+  
+  const cabinetCost = hasCabinets ? activeVilla.cabinetPrice : 0;
+  const appliancesCost = hasAppliances ? ADDON_PRICES.appliances : 0;
+  const acCost = acType === 'none' ? 0 : ADDON_PRICES.ac[villaType][acType as 'split' | 'advanced'];
+  
+  const currentUnitPrice = basePricePerUnit + cabinetCost + appliancesCost + acCost;
   const discountVal = typeof discount === 'number' ? discount : (parseFloat(discount as string) || 0);
+
+  const isBeneficiary = clientCategory === 'omani_beneficiary';
 
   // Sync installments when number changes
   useEffect(() => {
@@ -273,7 +305,7 @@ export default function App() {
   const unitList = unitsStr.split(',').map(x => x.trim()).filter(Boolean);
   const numUnits = unitList.length || 1;
 
-  const totalPrice = activeScenario.price * numUnits;
+  const totalPrice = currentUnitPrice * numUnits;
   const amountSaved = (totalPrice * discountVal) / 100;
   const housingSupportAmount = isBeneficiary ? (totalPrice * 0.1) : 0;
   const netPrice = totalPrice - amountSaved - housingSupportAmount;
@@ -294,8 +326,9 @@ export default function App() {
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'Real Estate Dashboard';
 
-    scenarios.forEach((scenario) => {
-      const sName = scenario.name[lang];
+    (['Q', 'P', 'O'] as const).forEach((vType) => {
+      const villa = villaConfigs[vType];
+      const sName = villa.name;
       const worksheet = workbook.addWorksheet(sName, {
         views: [{ showGridLines: false, rightToLeft: lang === 'ar' }]
       });
@@ -391,15 +424,17 @@ export default function App() {
       addSectionHeader(`${t.exQuotation} ${sName}`, r++);
 
       addDataRow(r++, t.exUnitsInc, unitList.join(' & '), false, true);
-      addDataRow(r++, scenario.title[lang], scenario.desc[lang], false);
+      
+      const vAcCost = acType === 'none' ? 0 : ADDON_PRICES.ac[vType][acType as 'split' | 'advanced'];
+      const vUnitPrice = villa.basePrice + (hasCabinets ? villa.cabinetPrice : 0) + (hasAppliances ? ADDON_PRICES.appliances : 0) + vAcCost;
 
-      const priceUnitCell = addDataRow(r++, t.exPriceUnit, scenario.price, true);
+      addDataRow(r++, t.exPriceUnit, vUnitPrice, true);
       r++; // gap
 
       // --- FINANCIAL BREAKDOWN ---
       addSectionHeader(t.finAdj, r++);
 
-      const totalCell = addDataRow(r++, t.exTotalUnits(numUnits), { formula: `=${priceUnitCell}*${numUnits}`, result: scenario.price * numUnits }, true);
+      const totalCell = addDataRow(r++, t.exTotalUnits(numUnits), { formula: `=C${r-2}*${numUnits}`, result: vUnitPrice * numUnits }, true);
 
       const discountCell = addDataRow(r++, t.discountPct, discountVal / 100, false, false, theme.goldBg, theme.gold);
       const savedCell = addDataRow(r++, t.amountSaved, { formula: `=${totalCell}*${discountCell}`, result: scenario.price * numUnits * (discountVal / 100) }, true);
@@ -458,7 +493,7 @@ export default function App() {
 
     });
 
-    workbook.views = [{ x: 0, y: 0, width: 10000, height: 20000, firstSheet: 0, activeTab: activeScenarioIdx, visibility: 'visible' }];
+    workbook.views = [{ x: 0, y: 0, width: 10000, height: 20000, firstSheet: 0, activeTab: (['Q', 'P', 'O'] as const).indexOf(villaType), visibility: 'visible' }];
     const buffer = await workbook.xlsx.writeBuffer();
     saveAs(new Blob([buffer]), 'Investment_Proposal.xlsx');
   };
@@ -553,46 +588,68 @@ export default function App() {
               </div>
               <div className="md:col-span-2 pt-2">
                 <label className="block text-xs font-bold text-slate-500 mb-3 uppercase tracking-wider">{t.clientType}</label>
-                <div className="flex gap-4">
+                <div className="flex flex-wrap gap-3">
                   <button 
-                    onClick={() => setIsBeneficiary(false)}
-                    className={`flex-1 p-3 rounded-lg border-2 transition-all flex items-center justify-center gap-2 font-bold ${!isBeneficiary ? 'border-amber-700 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}
+                    onClick={() => setClientCategory('omani_beneficiary')}
+                    className={`flex-1 min-w-[140px] p-3 rounded-lg border-2 transition-all flex items-center justify-center gap-2 font-bold ${clientCategory === 'omani_beneficiary' ? 'border-amber-700 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}
                   >
-                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${!isBeneficiary ? 'border-amber-700' : 'border-slate-300'}`}>
-                      {!isBeneficiary && <div className="w-2 h-2 rounded-full bg-amber-700"></div>}
-                    </div>
-                    {t.standardClient}
+                    {lang === 'ar' ? 'عماني مستحق' : 'Omani Beneficiary'}
                   </button>
                   <button 
-                    onClick={() => setIsBeneficiary(true)}
-                    className={`flex-1 p-3 rounded-lg border-2 transition-all flex items-center justify-center gap-2 font-bold ${isBeneficiary ? 'border-amber-700 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}
+                    onClick={() => setClientCategory('omani_non_beneficiary')}
+                    className={`flex-1 min-w-[140px] p-3 rounded-lg border-2 transition-all flex items-center justify-center gap-2 font-bold ${clientCategory === 'omani_non_beneficiary' ? 'border-amber-700 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}
                   >
-                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${isBeneficiary ? 'border-amber-700' : 'border-slate-300'}`}>
-                      {isBeneficiary && <div className="w-2 h-2 rounded-full bg-amber-700"></div>}
-                    </div>
-                    {t.beneficiaryClient}
+                    {lang === 'ar' ? 'عماني غير مستحق' : 'Omani Standard'}
+                  </button>
+                  <button 
+                    onClick={() => setClientCategory('foreigner')}
+                    className={`flex-1 min-w-[140px] p-3 rounded-lg border-2 transition-all flex items-center justify-center gap-2 font-bold ${clientCategory === 'foreigner' ? 'border-amber-700 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}
+                  >
+                    {lang === 'ar' ? 'أجنبي' : 'Foreigner'}
                   </button>
                 </div>
               </div>
             </div>
 
             <div className="pt-4 border-t border-slate-100">
-              <h3 className="text-sm font-bold text-slate-600 mb-4 uppercase tracking-wider">{t.basePriceConfig}</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {scenarios.map((scen, idx) => (
-                  <div key={scen.id} className="bg-slate-50 p-4 border border-slate-200 rounded-lg">
-                    <label className="block text-xs font-bold text-slate-700 mb-2">{scen.title[lang]}</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number" value={scen.price}
-                        onChange={(e) => {
-                          const newS = [...scenarios];
-                          newS[idx].price = Number(e.target.value) || 0;
-                          setScenarios(newS);
-                        }}
-                        className="w-full bg-white border border-slate-300 p-2 rounded focus:ring-2 focus:ring-amber-500 focus:outline-none font-mono"
-                      />
-                      <span className="text-xs text-slate-500 font-bold">{t.currency}</span>
+              <h3 className="text-sm font-bold text-slate-600 mb-4 uppercase tracking-wider">{lang === 'ar' ? 'إعدادات الأسعار (عماني / أجنبي)' : 'Price Settings (Omani / Foreigner)'}</h3>
+              <div className="grid grid-cols-1 gap-4">
+                {(['Q', 'P', 'O'] as const).map((vKey) => (
+                  <div key={vKey} className="bg-slate-50 p-4 border border-slate-200 rounded-lg grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+                    <div className="font-black text-slate-700">{villaConfigs[vKey].name}</div>
+                    
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">{lang === 'ar' ? 'سعر العماني' : 'Omani Price'}</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number" value={villaConfigs[vKey].basePriceOmani}
+                          onChange={(e) => {
+                            const newVal = Number(e.target.value) || 0;
+                            setVillaConfigs(prev => ({
+                              ...prev,
+                              [vKey]: { ...prev[vKey], basePriceOmani: newVal }
+                            }));
+                          }}
+                          className="w-full bg-white border border-slate-300 p-2 rounded focus:ring-2 focus:ring-amber-500 font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] font-bold text-slate-500 uppercase">{lang === 'ar' ? 'سعر الأجنبي' : 'Foreigner Price'}</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number" value={villaConfigs[vKey].basePriceForeigner}
+                          onChange={(e) => {
+                            const newVal = Number(e.target.value) || 0;
+                            setVillaConfigs(prev => ({
+                              ...prev,
+                              [vKey]: { ...prev[vKey], basePriceForeigner: newVal }
+                            }));
+                          }}
+                          className="w-full bg-white border border-slate-300 p-2 rounded focus:ring-2 focus:ring-amber-500 font-mono"
+                        />
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -640,23 +697,95 @@ export default function App() {
       {/* Quotation View */}
       {activeTab === 'quotation' && (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 px-8 py-6 shrink-0 animate-in fade-in duration-300">
-            {scenarios.map((scenario, idx) => (
-              <div key={scenario.id} onClick={() => setActiveScenarioIdx(idx)} className={`cursor-pointer transition-all bg-white border rounded-lg p-4 shadow-sm relative ${activeScenarioIdx === idx ? 'border-2 border-amber-700 bg-amber-50/30' : 'border-slate-200 hover:border-slate-300'}`}>
-                <span className={`absolute top-3 end-3 text-[10px] uppercase px-2 py-0.5 rounded font-bold ${activeScenarioIdx === idx ? 'bg-amber-700 text-white' : 'bg-slate-200 text-slate-600'}`}>
-                  {t.scenarioLabel} {idx + 1}
-                </span>
-                <h3 className="m-0 mb-2 text-sm text-slate-500 font-semibold">{scenario.title[lang]}</h3>
-                <div className={`text-lg font-bold ${activeScenarioIdx === idx ? 'text-amber-700' : 'text-slate-800'}`}>
-                  {formatPrice(scenario.price)} {currency}
-                </div>
-                <div className="text-xs mt-1 text-slate-400">{scenario.desc[lang]}</div>
-                <div className={`mt-3 pt-3 border-t border-dashed border-slate-200 font-semibold ${activeScenarioIdx === idx ? 'text-amber-700' : 'text-slate-800'}`}>
-                  {formatPrice(scenario.price * numUnits)} {currency} <span className="text-[10px] font-normal text-slate-600">{t.totalLabel}</span>
-                </div>
+      {/* Dynamic Configurator */}
+      {activeTab === 'quotation' && (
+        <div className="px-8 py-6 animate-in fade-in duration-500">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-stretch">
+            
+            {/* Villa Selector */}
+            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">{lang === 'ar' ? 'نوع الفيلا' : 'Villa Type'}</label>
+              <div className="flex flex-col gap-2">
+                {(['Q', 'P', 'O'] as const).map(type => (
+                  <button 
+                    key={type}
+                    onClick={() => setVillaType(type)}
+                    className={`flex items-center justify-between p-3 rounded-lg border-2 transition-all ${villaType === type ? 'border-amber-700 bg-amber-50 text-amber-900 shadow-md scale-[1.02]' : 'border-slate-100 text-slate-500 hover:border-slate-200'}`}
+                  >
+                    <div className="flex flex-col items-start">
+                      <span className="font-black text-lg">{lang === 'ar' ? `فيلا النوع ${type}` : `Villa ${type}`}</span>
+                      <span className="text-[10px] opacity-60 font-bold">{VILLA_DATA[type].cabinetSize}</span>
+                    </div>
+                    {villaType === type && <div className="w-2 h-2 rounded-full bg-amber-700"></div>}
+                  </button>
+                ))}
               </div>
-            ))}
+            </div>
+
+            {/* Kitchen Add-ons */}
+            <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">{lang === 'ar' ? 'إضافات المطبخ' : 'Kitchen Add-ons'}</label>
+              <div className="space-y-3">
+                <button 
+                  onClick={() => setHasCabinets(!hasCabinets)}
+                  className={`w-full flex items-center justify-between p-3 rounded-lg border-2 transition-all ${hasCabinets ? 'border-amber-700 bg-amber-50 text-amber-900 shadow-sm' : 'border-slate-100 text-slate-400 hover:border-slate-200'}`}
+                >
+                  <div className="flex flex-col items-start">
+                    <span className="font-bold text-sm">{lang === 'ar' ? 'خزائن المطبخ' : 'Cabinets'}</span>
+                    <span className="text-[10px] font-mono opacity-80">{formatPrice(VILLA_DATA[villaType].cabinetPrice)} {currency}</span>
+                  </div>
+                  <div className={`w-5 h-5 rounded flex items-center justify-center border-2 ${hasCabinets ? 'border-amber-700 bg-amber-700' : 'border-slate-200'}`}>
+                    {hasCabinets && <div className="w-2 h-0.5 bg-white rotate-45 translate-x-[-1px]"></div>}
+                    {hasCabinets && <div className="w-3 h-0.5 bg-white -rotate-45 translate-x-[-3px] translate-y-[1px]"></div>}
+                  </div>
+                </button>
+
+                <button 
+                  onClick={() => setHasAppliances(!hasAppliances)}
+                  className={`w-full flex items-center justify-between p-3 rounded-lg border-2 transition-all ${hasAppliances ? 'border-amber-700 bg-amber-50 text-amber-900 shadow-sm' : 'border-slate-100 text-slate-400 hover:border-slate-200'}`}
+                >
+                  <div className="flex flex-col items-start">
+                    <span className="font-bold text-sm">{lang === 'ar' ? 'أجهزة المطبخ (7 قطع)' : 'Appliances (7 Pcs)'}</span>
+                    <span className="text-[10px] font-mono opacity-80">{formatPrice(ADDON_PRICES.appliances)} {currency}</span>
+                  </div>
+                  <div className={`w-5 h-5 rounded flex items-center justify-center border-2 ${hasAppliances ? 'border-amber-700 bg-amber-700' : 'border-slate-200'}`}>
+                    {hasAppliances && <div className="w-2 h-0.5 bg-white rotate-45 translate-x-[-1px]"></div>}
+                    {hasAppliances && <div className="w-3 h-0.5 bg-white -rotate-45 translate-x-[-3px] translate-y-[1px]"></div>}
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* AC Configurator */}
+            <div className="lg:col-span-2 bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-4">{lang === 'ar' ? 'نظام التكييف' : 'AC System'}</label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <button 
+                  onClick={() => setAcType('none')}
+                  className={`p-3 rounded-lg border-2 transition-all text-start ${acType === 'none' ? 'border-amber-700 bg-amber-50 text-amber-900 shadow-md scale-[1.02]' : 'border-slate-100 text-slate-400 hover:border-slate-200'}`}
+                >
+                  <span className="block font-black text-sm uppercase">{lang === 'ar' ? 'بدون' : 'None'}</span>
+                  <span className="text-[10px] opacity-60">{lang === 'ar' ? 'تكييف أساسي' : 'Standard Basic'}</span>
+                </button>
+                <button 
+                  onClick={() => setAcType('split')}
+                  className={`p-3 rounded-lg border-2 transition-all text-start ${acType === 'split' ? 'border-amber-700 bg-amber-50 text-amber-900 shadow-md scale-[1.02]' : 'border-slate-100 text-slate-400 hover:border-slate-200'}`}
+                >
+                  <span className="block font-black text-sm uppercase">{lang === 'ar' ? 'جداري (Split)' : 'Split AC'}</span>
+                  <span className="text-[10px] font-mono block mt-1">+{formatPrice(ADDON_PRICES.ac[villaType].split)}</span>
+                </button>
+                <button 
+                  onClick={() => setAcType('advanced')}
+                  className={`p-3 rounded-lg border-2 transition-all text-start ${acType === 'advanced' ? 'border-amber-700 bg-amber-50 text-amber-900 shadow-md scale-[1.02]' : 'border-slate-100 text-slate-400 hover:border-slate-200'}`}
+                >
+                  <span className="block font-black text-sm uppercase">{lang === 'ar' ? 'متطور (Mixed)' : 'Advanced'}</span>
+                  <span className="text-[10px] font-mono block mt-1">+{formatPrice(ADDON_PRICES.ac[villaType].advanced)}</span>
+                </button>
+              </div>
+            </div>
           </div>
+        </div>
+      )}
 
           <main className="flex-1 grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-6 px-8 pb-6 w-full max-w-7xl mx-auto items-start animate-in fade-in duration-300">
             <div className="bg-slate-100 border border-slate-300 rounded-lg p-5">
@@ -833,7 +962,7 @@ export default function App() {
       )}
 
       <footer className="text-[11px] text-slate-500 py-4 px-8 bg-white border-t border-slate-200 shrink-0 mt-auto">
-        <strong className="text-slate-700">{t.termsTitle}</strong> {t.terms1} {discountVal}{t.terms2} {activeScenario.name[lang]}. {t.validText}
+        <strong className="text-slate-700">{t.termsTitle}</strong> {t.terms1} {discountVal}{t.terms2} {villaConfigs[villaType].name}. {t.validText}
       </footer>
     </div>
   );
