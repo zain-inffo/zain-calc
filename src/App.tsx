@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Download, FileSpreadsheet, Globe, Settings, FileText, TriangleAlert } from 'lucide-react';
+import { Download, FileSpreadsheet, Globe, Settings, FileText, TriangleAlert, LayoutDashboard, Languages, Printer } from 'lucide-react';
 import * as ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { motion, AnimatePresence } from 'motion/react';
@@ -426,7 +426,8 @@ export default function App() {
       addDataRow(r++, t.exUnitsInc, unitList.join(' & '), false, true);
       
       const vAcCost = acType === 'none' ? 0 : ADDON_PRICES.ac[vType][acType as 'split' | 'advanced'];
-      const vUnitPrice = villa.basePrice + (hasCabinets ? villa.cabinetPrice : 0) + (hasAppliances ? ADDON_PRICES.appliances : 0) + vAcCost;
+      const vBasePrice = isForeigner ? villa.basePriceForeigner : villa.basePriceOmani;
+      const vUnitPrice = vBasePrice + (hasCabinets ? villa.cabinetPrice : 0) + (hasAppliances ? ADDON_PRICES.appliances : 0) + vAcCost;
 
       addDataRow(r++, t.exPriceUnit, vUnitPrice, true);
       r++; // gap
@@ -437,15 +438,15 @@ export default function App() {
       const totalCell = addDataRow(r++, t.exTotalUnits(numUnits), { formula: `=C${r-2}*${numUnits}`, result: vUnitPrice * numUnits }, true);
 
       const discountCell = addDataRow(r++, t.discountPct, discountVal / 100, false, false, theme.goldBg, theme.gold);
-      const savedCell = addDataRow(r++, t.amountSaved, { formula: `=${totalCell}*${discountCell}`, result: scenario.price * numUnits * (discountVal / 100) }, true);
+      const savedCell = addDataRow(r++, t.amountSaved, { formula: `=${totalCell}*${discountCell}`, result: vUnitPrice * numUnits * (discountVal / 100) }, true);
 
       let totalDeductionsFormula = `=${savedCell}`;
-      let totalDeductionsValue = scenario.price * numUnits * (discountVal / 100);
+      let totalDeductionsValue = vUnitPrice * numUnits * (discountVal / 100);
 
       if (isBeneficiary) {
-        const supportCell = addDataRow(r++, t.housingSupport, { formula: `=${totalCell}*0.1`, result: scenario.price * numUnits * 0.1 }, true, false, 'FFF0F9FF', 'FF0369A1');
+        const supportCell = addDataRow(r++, t.housingSupport, { formula: `=${totalCell}*0.1`, result: vUnitPrice * numUnits * 0.1 }, true, false, 'FFF0F9FF', 'FF0369A1');
         totalDeductionsFormula += `+${supportCell}`;
-        totalDeductionsValue += scenario.price * numUnits * 0.1;
+        totalDeductionsValue += vUnitPrice * numUnits * 0.1;
       }
 
       // Hero row for Net Proposal Price
@@ -459,7 +460,7 @@ export default function App() {
       netLabel.alignment = { vertical: 'middle', indent: 1 };
 
       const netValue = worksheet.getCell(`C${r}`);
-      netValue.value = { formula: `=${totalPriceCell}-(${totalDeductionsFormula})`, result: scenario.price * numUnits - totalDeductionsValue };
+      netValue.value = { formula: `=${totalCell}-(${totalDeductionsFormula})`, result: vUnitPrice * numUnits - totalDeductionsValue };
       netValue.font = { name: 'Segoe UI', size: 16, bold: true, color: { argb: theme.gold } };
       netValue.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: theme.primary } };
       netValue.alignment = { vertical: 'middle', horizontal: lang === 'ar' ? 'left' : 'right' };
@@ -502,69 +503,49 @@ export default function App() {
     <div dir={lang === 'ar' ? 'rtl' : 'ltr'} className="min-h-screen bg-slate-50 text-slate-800 font-sans flex flex-col">
       {/* Header */}
       <header className="bg-slate-900 text-slate-50 pt-5 pb-0 shrink-0 border-b-4 border-amber-700">
-        <div className="px-8 pb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-          <div>
-            <h1 className="m-0 text-xl tracking-tight font-bold">{t.title}{unitList.length > 0 ? `: ${unitList.join(' & ')}` : ''}</h1>
-            <p className="mt-1 opacity-60 text-xs">{t.subtitlePrep} {clientName} | {t.ref} {refNumber}</p>
+        <div className="px-4 sm:px-8 pb-4 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+          <div className="w-full lg:w-auto">
+            <h1 className="m-0 text-lg sm:text-xl tracking-tight font-bold leading-tight">{t.title}{unitList.length > 0 ? `: ${unitList.join(' & ')}` : ''}</h1>
+            <p className="mt-1 opacity-60 text-[10px] sm:text-xs">{t.subtitlePrep} {clientName} | {t.ref} {refNumber}</p>
           </div>
-          <div className="text-start sm:text-end flex sm:flex-col items-center sm:items-end gap-3 sm:gap-0">
-            <div className="flex items-center gap-2 mb-2">
-              {/* Currency Selector */}
-              <div className="flex bg-slate-800 p-1 rounded-lg mr-2">
-                {(['OMR', 'USD', 'AED'] as const).map((curr) => (
-                  <button
-                    key={curr}
-                    onClick={() => setCurrency(curr)}
-                    className={`px-2 py-1 text-[10px] font-bold rounded transition-all ${currency === curr ? 'bg-amber-700 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-                  >
-                    {curr}
-                  </button>
-                ))}
-              </div>
-
-              <button onClick={toggleLang} className="flex items-center gap-1.5 text-xs font-semibold bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-full transition-colors focus:ring-2 focus:ring-amber-500">
-                <Globe size={14} />
-                {lang === 'ar' ? 'English' : 'عربي'}
-              </button>
+          <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto justify-start lg:justify-end">
+            <div className="flex bg-slate-800 p-1 rounded-lg">
+              {(['OMR', 'USD', 'AED'] as const).map((curr) => (
+                <button
+                  key={curr}
+                  onClick={() => setCurrency(curr)}
+                  className={`px-2 py-1 text-[10px] font-bold rounded transition-all ${currency === curr ? 'bg-amber-700 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  {curr}
+                </button>
+              ))}
             </div>
-            {activeTab === 'quotation' && (
-              <>
-                <div className="text-2xl font-bold text-slate-50 flex items-baseline gap-2">
-                  <span className="text-amber-700 text-sm uppercase">{currency}</span> 
-                  <AnimatedNumber value={netPrice * CURRENCY_RATES[currency]} />
-                </div>
-                <div className="text-[11px] uppercase tracking-widest opacity-80">{t.projectedNet}</div>
-              </>
-            )}
+            <button onClick={toggleLang} className="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-[10px] font-bold flex items-center gap-2 border border-slate-700 transition-all">
+              {lang === 'en' ? 'العربية' : 'English'} <Languages size={14} className="text-amber-500" />
+            </button>
           </div>
         </div>
 
-        {/* Tab Navigation + PDF Button */}
-        <div className="px-8 flex justify-between items-center mt-2 relative top-[4px]">
-          <div className="flex gap-6">
-            <button
-              onClick={() => setActiveTab('quotation')}
-              className={`flex items-center gap-2 pb-3 px-1 text-sm font-bold border-b-4 transition-colors ${activeTab === 'quotation' ? 'border-amber-700 text-amber-500' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
-            >
-              <FileText size={16} /> {t.quotationTab}
-            </button>
-            <button
-              onClick={() => setActiveTab('settings')}
-              className={`flex items-center gap-2 pb-3 px-1 text-sm font-bold border-b-4 transition-colors ${activeTab === 'settings' ? 'border-amber-700 text-amber-500' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
-            >
-              <Settings size={16} /> {t.settingsUI}
-            </button>
-          </div>
-
-          {activeTab === 'quotation' && (
-            <button 
-              onClick={() => window.print()}
-              className="flex items-center gap-2 pb-3 px-3 text-sm font-bold text-emerald-400 hover:text-emerald-300 transition-colors"
-            >
-              <Download size={16}/> {lang === 'ar' ? 'طباعة / PDF' : 'Print / PDF'}
-            </button>
-          )}
-        </div>
+        <nav className="px-4 sm:px-8 flex items-center gap-4 sm:gap-8 overflow-x-auto no-scrollbar relative top-[2px]">
+          <button
+            onClick={() => setActiveTab('quotation')}
+            className={`pb-3 px-1 text-xs sm:text-sm font-bold transition-all border-b-4 flex items-center gap-2 whitespace-nowrap ${activeTab === 'quotation' ? 'border-amber-500 text-amber-500' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+          >
+            <LayoutDashboard size={16} /> {t.quotationTab}
+          </button>
+          <button
+            onClick={() => setActiveTab('settings')}
+            className={`pb-3 px-1 text-xs sm:text-sm font-bold transition-all border-b-4 flex items-center gap-2 whitespace-nowrap ${activeTab === 'settings' ? 'border-amber-500 text-amber-500' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+          >
+            <Settings size={16} /> {t.settingsUI}
+          </button>
+          <button
+            onClick={() => window.print()}
+            className="pb-3 px-1 text-xs sm:text-sm font-bold transition-all border-b-4 border-transparent text-emerald-400 hover:text-emerald-300 flex items-center gap-2 whitespace-nowrap"
+          >
+            <Printer size={16} /> {lang === 'ar' ? 'طباعة / PDF' : 'Print / PDF'}
+          </button>
+        </nav>
       </header>
 
       {/* Settings View */}
@@ -845,7 +826,7 @@ export default function App() {
               <button
                 onClick={exportToExcel}
                 disabled={!isValidPct}
-                className={`hidden sm:flex transition-colors text-white px-4 py-2.5 rounded font-semibold text-xs items-center gap-2 w-full justify-center mt-2 shadow-sm ${isValidPct ? 'bg-slate-900 hover:bg-slate-800' : 'bg-slate-400 cursor-not-allowed'}`}
+                className={`flex transition-colors text-white px-4 py-2.5 rounded font-semibold text-xs items-center gap-2 w-full justify-center mt-2 shadow-sm ${isValidPct ? 'bg-slate-900 hover:bg-slate-800' : 'bg-slate-400 cursor-not-allowed'}`}
               >
                 <FileSpreadsheet size={16} className={isValidPct ? 'text-emerald-400' : 'text-slate-300'} /> {t.exportBtn}
               </button>
