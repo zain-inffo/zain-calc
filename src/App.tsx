@@ -39,6 +39,11 @@ const DICT = {
     exUnitsInc: "Units Included",
     exPriceUnit: "Price per Unit",
     exPaymentSch: "Payment Schedule Breakdowns",
+    isBeneficiaryLabel: "Housing Ministry Beneficiary (10% Support)",
+    housingSupport: "Housing Ministry Support",
+    clientType: "Client Type",
+    standardClient: "Standard Client",
+    beneficiaryClient: "Beneficiary (Housing Ministry)",
 
     settingsUI: "Settings",
     quotationTab: "Quotation View",
@@ -90,6 +95,11 @@ const DICT = {
     exUnitsInc: "الوحدات المشمولة",
     exPriceUnit: "سعر الوحدة",
     exPaymentSch: "تفاصيل الدفعات",
+    isBeneficiaryLabel: "عميل مستحق (دعم وزارة الإسكان 10%)",
+    housingSupport: "دعم وزارة الإسكان",
+    clientType: "نوع العميل",
+    standardClient: "عميل عادي",
+    beneficiaryClient: "عميل مستحق (دعم الإسكان)",
 
     settingsUI: "الإعدادات",
     quotationTab: "أداة عرض السعر",
@@ -159,6 +169,7 @@ export default function App() {
   const [numInstallments, setNumInstallments] = useState(8); // Total payments
   const [paymentFreq, setPaymentFreq] = useState<'monthly' | 'quarterly'>('quarterly');
   const [installments, setInstallments] = useState<string[]>(DEFAULT_INSTALLMENTS);
+  const [isBeneficiary, setIsBeneficiary] = useState(false);
 
   const [currency, setCurrency] = useState<'OMR' | 'USD' | 'AED'>('OMR');
 
@@ -264,7 +275,8 @@ export default function App() {
 
   const totalPrice = activeScenario.price * numUnits;
   const amountSaved = (totalPrice * discountVal) / 100;
-  const netPrice = totalPrice - amountSaved;
+  const housingSupportAmount = isBeneficiary ? (totalPrice * 0.1) : 0;
+  const netPrice = totalPrice - amountSaved - housingSupportAmount;
 
   // Percentage Calculations
   const installmentsSum = installments.reduce((acc, val) => acc + (parseFloat(val) || 0), 0);
@@ -390,8 +402,16 @@ export default function App() {
       const totalCell = addDataRow(r++, t.exTotalUnits(numUnits), { formula: `=${priceUnitCell}*${numUnits}`, result: scenario.price * numUnits }, true);
 
       const discountCell = addDataRow(r++, t.discountPct, discountVal / 100, false, false, theme.goldBg, theme.gold);
-
       const savedCell = addDataRow(r++, t.amountSaved, { formula: `=${totalCell}*${discountCell}`, result: scenario.price * numUnits * (discountVal / 100) }, true);
+
+      let totalDeductionsFormula = `=${savedCell}`;
+      let totalDeductionsValue = scenario.price * numUnits * (discountVal / 100);
+
+      if (isBeneficiary) {
+        const supportCell = addDataRow(r++, t.housingSupport, { formula: `=${totalCell}*0.1`, result: scenario.price * numUnits * 0.1 }, true, false, 'FFF0F9FF', 'FF0369A1');
+        totalDeductionsFormula += `+${supportCell}`;
+        totalDeductionsValue += scenario.price * numUnits * 0.1;
+      }
 
       // Hero row for Net Proposal Price
       const netRowObj = worksheet.getRow(r);
@@ -404,7 +424,7 @@ export default function App() {
       netLabel.alignment = { vertical: 'middle', indent: 1 };
 
       const netValue = worksheet.getCell(`C${r}`);
-      netValue.value = { formula: `=${totalCell}-${savedCell}`, result: scenario.price * numUnits - (scenario.price * numUnits * (discountVal / 100)) };
+      netValue.value = { formula: `=${totalPriceCell}-(${totalDeductionsFormula})`, result: scenario.price * numUnits - totalDeductionsValue };
       netValue.font = { name: 'Segoe UI', size: 16, bold: true, color: { argb: theme.gold } };
       netValue.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: theme.primary } };
       netValue.alignment = { vertical: 'middle', horizontal: lang === 'ar' ? 'left' : 'right' };
@@ -531,6 +551,29 @@ export default function App() {
                 <label className="block text-xs font-bold text-slate-500 mb-1.5 uppercase tracking-wider">{t.unitsInput}</label>
                 <input type="text" value={unitsStr} onChange={(e) => setUnitsStr(e.target.value)} className="w-full bg-slate-50 border border-slate-200 p-2.5 rounded-md focus:ring-2 focus:ring-amber-500 focus:outline-none" />
               </div>
+              <div className="md:col-span-2 pt-2">
+                <label className="block text-xs font-bold text-slate-500 mb-3 uppercase tracking-wider">{t.clientType}</label>
+                <div className="flex gap-4">
+                  <button 
+                    onClick={() => setIsBeneficiary(false)}
+                    className={`flex-1 p-3 rounded-lg border-2 transition-all flex items-center justify-center gap-2 font-bold ${!isBeneficiary ? 'border-amber-700 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}
+                  >
+                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${!isBeneficiary ? 'border-amber-700' : 'border-slate-300'}`}>
+                      {!isBeneficiary && <div className="w-2 h-2 rounded-full bg-amber-700"></div>}
+                    </div>
+                    {t.standardClient}
+                  </button>
+                  <button 
+                    onClick={() => setIsBeneficiary(true)}
+                    className={`flex-1 p-3 rounded-lg border-2 transition-all flex items-center justify-center gap-2 font-bold ${isBeneficiary ? 'border-amber-700 bg-amber-50 text-amber-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}
+                  >
+                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${isBeneficiary ? 'border-amber-700' : 'border-slate-300'}`}>
+                      {isBeneficiary && <div className="w-2 h-2 rounded-full bg-amber-700"></div>}
+                    </div>
+                    {t.beneficiaryClient}
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div className="pt-4 border-t border-slate-100">
@@ -651,6 +694,16 @@ export default function App() {
                   - <AnimatedNumber value={amountSaved} /> {currency}
                 </div>
               </div>
+
+              {isBeneficiary && (
+                <div className="bg-sky-50 p-3 rounded-md mb-3 shadow-sm border border-sky-200 relative overflow-hidden animate-in slide-in-from-right-2">
+                  <div className="absolute top-0 end-0 bg-sky-200 text-sky-700 text-[8px] font-black px-1.5 py-0.5 rounded-bl uppercase">10% OFF</div>
+                  <div className="text-[11px] text-sky-600 font-bold mb-0.5">{t.housingSupport}</div>
+                  <div className="text-base font-bold text-sky-700">
+                    - <AnimatedNumber value={housingSupportAmount} /> {currency}
+                  </div>
+                </div>
+              )}
               
               <div className="bg-white p-3 rounded-md shadow-sm border border-slate-200/60 mb-5 relative overflow-hidden">
                 <div className="absolute start-0 top-0 bottom-0 w-1 bg-slate-800"></div>
@@ -669,7 +722,35 @@ export default function App() {
               </button>
             </div>
 
-            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden flex flex-col shadow-sm">
+            <div className="flex flex-col gap-6 overflow-hidden">
+              {/* Printing Header / Financial Summary */}
+              <div className="bg-slate-900 text-white p-6 rounded-lg shadow-md flex flex-wrap justify-between items-center gap-6">
+                <div className="flex flex-col gap-1">
+                  <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">{t.exTotalUnits(numUnits)}</span>
+                  <span className="text-xl font-bold">{formatPrice(totalPrice)} {currency}</span>
+                </div>
+                
+                <div className="flex gap-8">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">{t.discountPct} ({discount}%)</span>
+                    <span className="text-emerald-400 font-bold">-{formatPrice(amountSaved)}</span>
+                  </div>
+                  
+                  {isBeneficiary && (
+                    <div className="flex flex-col gap-1">
+                      <span className="text-sky-400 text-[10px] font-bold uppercase tracking-widest">{t.housingSupport} (10%)</span>
+                      <span className="text-sky-300 font-bold">-{formatPrice(housingSupportAmount)}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-amber-700 px-5 py-3 rounded-md flex flex-col items-center">
+                  <span className="text-amber-200 text-[10px] font-bold uppercase tracking-widest leading-none mb-1">{t.netPrice}</span>
+                  <span className="text-2xl font-black">{formatPrice(netPrice)} {currency}</span>
+                </div>
+              </div>
+
+              <div className="bg-white border border-slate-200 rounded-lg overflow-hidden flex flex-col shadow-sm">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm text-start">
                   <thead>
