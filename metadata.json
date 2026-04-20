@@ -1,0 +1,6 @@
+{
+  "name": "Real Estate Quotation Generator",
+  "description": "A dashboard serving a generated Python script to create interactive real estate Excel quotations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
